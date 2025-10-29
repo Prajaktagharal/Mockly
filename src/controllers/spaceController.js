@@ -66,7 +66,13 @@ exports.createSpace = async (req, res) => {
   console.log('Creating space...');
   console.log('Request body:', req.body);
   try {
-    const { companyName, jobPosition, interviewRounds, jobDescription } = req.body;
+    // Provide defaults so missing form fields won't break validation
+    const {
+      companyName = 'N/A',
+      jobPosition = 'N/A',
+      interviewRounds,
+      jobDescription = '' // keep empty string if not provided
+    } = req.body;
     
     // Fix for single round selection - ensure it's always an array
     const rounds = Array.isArray(interviewRounds) 
@@ -76,46 +82,47 @@ exports.createSpace = async (req, res) => {
     const resumePath = req.file ? req.file.path : '';
     const fileName = req.file ? req.file.filename : '';
   
-    if (!companyName || !jobPosition || rounds.length === 0 || !resumePath) {
-      return res.status(400).send('Company name, job position, interview rounds, and resume are required.');
+    // Changed validation: only require interview rounds and resume file.
+    if (rounds.length === 0 || !resumePath) {
+      return res.status(400).send('Interview rounds and resume are required.');
     }
       
-        let resumeText = '';
-        if (resumePath.endsWith('.pdf')) {
-            resumeText = await extractTextFromPDF(resumePath);
-        } else if (resumePath.endsWith('.docx')) {
-            resumeText = await extractTextFromDOCX(resumePath);
-        } else {
-            return res.status(400).send('Only PDF and DOCX file types are supported.');
-        }
-      
-        const isJobDescriptionValid = jobDescription && jobDescription.trim().length > 20;
-        const purifiedSummary = await purifyContent(resumeText, isJobDescriptionValid ? jobDescription : '');
-
-        const newSpace = new Space({
-            studentId: req.session.uniqueId, // Use uniqueId instead of studentId
-            companyName,
-            jobPosition,
-            interviewRounds: rounds.map((round) => ({ name: round })),
-            jobDescription: isJobDescriptionValid ? jobDescription : 'N/A',
-            resumePath: fileName,
-            resumeText,
-            purifiedSummary,
-        });
-
-        await newSpace.save();
-        
-        // Update session's spaces array
-        await Session.findOneAndUpdate(
-            { uniqueId: req.session.uniqueId },
-            { $push: { spaces: newSpace._id } }
-        );
-        
-        res.redirect('/dashboard');
-    } catch (err) {
-        console.error('Error creating space:', err);
-        res.status(500).send('Error creating space. Please try again.');
+    let resumeText = '';
+    if (resumePath.endsWith('.pdf')) {
+        resumeText = await extractTextFromPDF(resumePath);
+    } else if (resumePath.endsWith('.docx')) {
+        resumeText = await extractTextFromDOCX(resumePath);
+    } else {
+        return res.status(400).send('Only PDF and DOCX file types are supported.');
     }
+      
+    const isJobDescriptionValid = jobDescription && jobDescription.trim().length > 20;
+    const purifiedSummary = await purifyContent(resumeText, isJobDescriptionValid ? jobDescription : '');
+
+    const newSpace = new Space({
+        studentId: req.session.uniqueId, // Use uniqueId instead of studentId
+        companyName: companyName || 'N/A',       // defaults applied above, but keep fallback
+        jobPosition: jobPosition || 'N/A',
+        interviewRounds: rounds.map((round) => ({ name: round })),
+        jobDescription: isJobDescriptionValid ? jobDescription : 'N/A',
+        resumePath: fileName,
+        resumeText,
+        purifiedSummary,
+    });
+
+    await newSpace.save();
+        
+    // Update session's spaces array
+    await Session.findOneAndUpdate(
+        { uniqueId: req.session.uniqueId },
+        { $push: { spaces: newSpace._id } }
+    );
+        
+    res.redirect('/dashboard');
+  } catch (err) {
+    console.error('Error creating space:', err);
+    res.status(500).send('Error creating space. Please try again.');
+  }
 };
 
 // Fetch all spaces for a session
